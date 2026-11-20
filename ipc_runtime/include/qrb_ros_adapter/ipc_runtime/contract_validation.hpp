@@ -9,6 +9,7 @@
 
 #include "qrb/contract/common/v1/header.pb.h"
 #include "qrb/contract/geometry/v1/pose_with_covariance_stamped.pb.h"
+#include "qrb/contract/geometry/v1/twist_stamped.pb.h"
 #include "qrb/contract/nav/v1/odometry.pb.h"
 #include "qrb/contract/sensor/v1/point_cloud2.pb.h"
 #include "qrb_ros_adapter/ipc_runtime/contract_limits.hpp"
@@ -31,6 +32,9 @@ ConversionResult ValidatePoseWithCovarianceStamped(
  * empty or 36-value covariance.
  */
 ConversionResult ValidateOdometry(const qrb::contract::nav::v1::Odometry & odometry);
+
+/** @brief Checks the header and that the twist is present and finite. */
+ConversionResult ValidateTwistStamped(const qrb::contract::geometry::v1::TwistStamped & twist);
 
 ConversionResult ValidatePointCloud2(const qrb::contract::sensor::v1::PointCloud2 & cloud,
     std::uint64_t externalPayloadSize);

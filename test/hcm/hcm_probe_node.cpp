@@ -193,6 +193,55 @@ struct HcmProbeSample<adapter::OdometryHcmDescriptor>
   }
 };
 
+// --- geometry.v1.TwistStamped (inline) ----------------------------------------
+
+/**
+ * The twist has no covariance, so the probe stamps its six values themselves,
+ * linear x, y, z then angular x, y, z: the smallest stamp StampDoubles() takes.
+ */
+template <>
+struct HcmProbeSample<adapter::TwistHcmDescriptor>
+{
+  using Descriptor = adapter::TwistHcmDescriptor;
+  static constexpr const char * kFrameId = "stream_probe";
+  using Values = std::array<double, kMinProbeDoubles>;
+
+  static std::string CheckPayloadBytes(std::uint64_t) { return {}; }
+
+  static std::uint64_t SentBytes(const HcmSenderState &) { return sizeof(Values); }
+
+  static HcmStampResult Stamp(Descriptor & twist, HcmSenderState & state, std::uint64_t sequence)
+  {
+    if (twist.frameId != kFrameId)
+      (void)twist.frameId.Assign(kFrameId);  // fits FrameId_t
+    const std::uint64_t now = MonotonicNowNs();
+    state.lastSendNs = now;
+    twist.timestampNs = now;
+    Values values{};
+    StampDoubles(values.data(), values.size(), state.streamTag, sequence, now);
+    twist.twist.linear.x = values[0];
+    twist.twist.linear.y = values[1];
+    twist.twist.linear.z = values[2];
+    twist.twist.angular.x = values[3];
+    twist.twist.angular.y = values[4];
+    twist.twist.angular.z = values[5];
+    return HcmStampResult::kOk;
+  }
+
+  static FrameReading Check(const Descriptor & twist,
+      std::uint32_t streamTag,
+      std::uint64_t & payloadBytes)
+  {
+    payloadBytes = sizeof(Values);
+    const Values values{twist.twist.linear.x, twist.twist.linear.y, twist.twist.linear.z,
+        twist.twist.angular.x, twist.twist.angular.y, twist.twist.angular.z};
+    FrameReading reading = CheckDoubles(values.data(), values.size(), streamTag);
+    if (reading.check == FrameCheck::kOk && twist.frameId != kFrameId)
+      reading.check = FrameCheck::kBadLayout;
+    return reading;
+  }
+};
+
 // --- sensor.v1.PointCloud2 (DMA-BUF) ------------------------------------------
 
 /** One row of `payload_bytes / 16` points x, y, z, intensity (FLOAT32). */

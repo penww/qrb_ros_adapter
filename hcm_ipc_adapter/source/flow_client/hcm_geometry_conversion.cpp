@@ -63,31 +63,40 @@ void PoseWithCovarianceToContract(const QRB::Memory::PoseWithCovariance_t & sour
   CovarianceToContract(source.covariance, *target.mutable_covariance());
 }
 
+void TwistToHcm(const ::qrb::contract::geometry::v1::Twist & source, QRB::Memory::Twist_t & target)
+{
+  target.linear.x = source.linear().x();
+  target.linear.y = source.linear().y();
+  target.linear.z = source.linear().z();
+  target.angular.x = source.angular().x();
+  target.angular.y = source.angular().y();
+  target.angular.z = source.angular().z();
+}
+
+void TwistToContract(const QRB::Memory::Twist_t & source,
+    ::qrb::contract::geometry::v1::Twist & target)
+{
+  auto * linear = target.mutable_linear();
+  linear->set_x(source.linear.x);
+  linear->set_y(source.linear.y);
+  linear->set_z(source.linear.z);
+  auto * angular = target.mutable_angular();
+  angular->set_x(source.angular.x);
+  angular->set_y(source.angular.y);
+  angular->set_z(source.angular.z);
+}
+
 void TwistWithCovarianceToHcm(const ::qrb::contract::geometry::v1::TwistWithCovariance & source,
     QRB::Memory::TwistWithCovariance_t & target)
 {
-  const auto & linear = source.twist().linear();
-  const auto & angular = source.twist().angular();
-  target.twist.linear.x = linear.x();
-  target.twist.linear.y = linear.y();
-  target.twist.linear.z = linear.z();
-  target.twist.angular.x = angular.x();
-  target.twist.angular.y = angular.y();
-  target.twist.angular.z = angular.z();
+  TwistToHcm(source.twist(), target.twist);
   CovarianceToHcm(source.covariance(), target.covariance);
 }
 
 void TwistWithCovarianceToContract(const QRB::Memory::TwistWithCovariance_t & source,
     ::qrb::contract::geometry::v1::TwistWithCovariance & target)
 {
-  auto * linear = target.mutable_twist()->mutable_linear();
-  linear->set_x(source.twist.linear.x);
-  linear->set_y(source.twist.linear.y);
-  linear->set_z(source.twist.linear.z);
-  auto * angular = target.mutable_twist()->mutable_angular();
-  angular->set_x(source.twist.angular.x);
-  angular->set_y(source.twist.angular.y);
-  angular->set_z(source.twist.angular.z);
+  TwistToContract(source.twist, *target.mutable_twist());
   CovarianceToContract(source.covariance, *target.mutable_covariance());
 }
 

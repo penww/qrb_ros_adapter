@@ -45,6 +45,7 @@
 #include "QC/sample/DataBroker.hpp"
 #include "QC/sample/SampleIF.hpp"
 #include "QRB/Memory/Geometry/PoseDescriptor.hpp"
+#include "QRB/Memory/Geometry/TwistDescriptor.hpp"
 #include "QRB/Memory/Navigation/OdometryDescriptor.hpp"
 #include "QRB/Memory/Sensor/PointCloudDescriptor.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/ipc_adapter_node/hcm_ipc_adapter_node.hpp"
@@ -151,6 +152,7 @@ private:
             kPointCloudContract,
             kPoseContract,
             "qrb.contract.nav.v1.Odometry",
+            "qrb.contract.geometry.v1.TwistStamped",
     };
     bool IsFilledContract() const;
 
@@ -436,6 +438,12 @@ void SampleIpcAdapter::FillFrame( ContractFrame &frame )
         (void) odom->childFrameId.Assign( "base_link" );
     }
 
+    auto *twist = dynamic_cast<QRB::Memory::TwistDescriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != twist )
+    {
+        (void) twist->frameId.Assign( "base_link" );
+    }
+
     auto *cloud = dynamic_cast<QRB::Memory::PointCloudDescriptor_t *>( &frame.Descriptor() );
     if ( nullptr == cloud )
     {
@@ -491,6 +499,14 @@ void SampleIpcAdapter::UpdateFrame( ContractFrame &frame )
         odom->timestampNs = nowNs;
         odom->poseWithCovariance.pose.position.x = (double) m_frames * 0.01;
         odom->twistWithCovariance.twist.linear.x = 0.01 * (double) m_fps;
+    }
+
+    auto *twist = dynamic_cast<QRB::Memory::TwistDescriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != twist )
+    {
+        // Turn in place, faster with every frame and back to rest every 100 frames.
+        twist->timestampNs = nowNs;
+        twist->twist.angular.z = (double) ( m_frames % 100 ) * 0.01;
     }
 }
 

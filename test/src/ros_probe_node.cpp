@@ -8,6 +8,7 @@
 #undef QRB_CONTRACT_MAPPING_INCLUDE_ROS_HEADERS
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <fstream>
@@ -171,6 +172,66 @@ struct RosProbeSample<adapter::OdometryRosMessage>
             odom.pose.pose.orientation.w != 1.0 ||
             odom.twist.covariance[0] != kTwistCovarianceMarker ||
             odom.twist.covariance[35] != kTwistCovarianceMarker))
+      reading.check = FrameCheck::kBadLayout;
+    return reading;
+  }
+};
+
+// --- geometry.v1.TwistStamped (inline) ----------------------------------------
+
+/**
+ * The twist has no covariance, so the probe stamps its six values themselves,
+ * linear x, y, z then angular x, y, z. The layout is the one HcmProbeSample<>
+ * uses, so either side checks what the other sends.
+ */
+template <>
+struct RosProbeSample<adapter::TwistRosMessage>
+{
+  using Message = adapter::TwistRosMessage;
+  static constexpr const char * kFrameId = "stream_probe";
+  using Values = std::array<double, kMinProbeDoubles>;
+
+  class Source
+  {
+  public:
+    Source(std::uint64_t, std::uint32_t, std::uint32_t streamTag) : streamTag_(streamTag) {}
+
+    SendOutcome Next(std::uint64_t sequence,
+        std::unique_ptr<Message> & out,
+        std::uint64_t & sendTimeNs)
+    {
+      out = std::make_unique<Message>();
+      out->header.frame_id = kFrameId;
+      const std::uint64_t now = MonotonicNowNs();
+      sendTimeNs = now;
+      out->header.stamp.sec = static_cast<std::int32_t>(now / 1000000000ull);
+      out->header.stamp.nanosec = static_cast<std::uint32_t>(now % 1000000000ull);
+      Values values{};
+      StampDoubles(values.data(), values.size(), streamTag_, sequence, now);
+      out->twist.linear.x = values[0];
+      out->twist.linear.y = values[1];
+      out->twist.linear.z = values[2];
+      out->twist.angular.x = values[3];
+      out->twist.angular.y = values[4];
+      out->twist.angular.z = values[5];
+      return SendOutcome::kSent;
+    }
+
+    std::uint64_t PayloadBytes() const { return sizeof(Values); }
+
+  private:
+    std::uint32_t streamTag_;
+  };
+
+  static FrameReading Check(const Message & twist,
+      std::uint32_t streamTag,
+      std::uint64_t & payloadBytes)
+  {
+    payloadBytes = sizeof(Values);
+    const Values values{twist.twist.linear.x, twist.twist.linear.y, twist.twist.linear.z,
+        twist.twist.angular.x, twist.twist.angular.y, twist.twist.angular.z};
+    FrameReading reading = CheckDoubles(values.data(), values.size(), streamTag);
+    if (reading.check == FrameCheck::kOk && twist.header.frame_id != kFrameId)
       reading.check = FrameCheck::kBadLayout;
     return reading;
   }

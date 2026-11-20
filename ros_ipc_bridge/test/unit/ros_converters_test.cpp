@@ -17,6 +17,7 @@
 
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/odometry_ros_converter.hpp"
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/point_cloud_ros_converter.hpp"
+#include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/twist_ros_converter.hpp"
 
 using namespace qrb::adapter;
 
@@ -207,4 +208,36 @@ TEST(OdometryRosConverter, MapsEveryFieldBothWaysAndRejectsInvalidValues)
   ASSERT_TRUE(OdometryRosConversion::RosToContract(ros, badContract));
   badContract.set_child_frame_id("/base_link");
   EXPECT_FALSE(OdometryRosConversion::ContractToRos(badContract, back));
+}
+
+// UT-ROS-03: geometry_msgs/TwistStamped maps 1:1 to the Contract; an invalid
+// value is rejected in either direction.
+TEST(TwistRosConverter, MapsEveryFieldBothWaysAndRejectsInvalidValues)
+{
+  TwistRosMessage ros;
+  ros.header.stamp.sec = 7;
+  ros.header.stamp.nanosec = 8;
+  ros.header.frame_id = "base_link";
+  ros.twist.linear.x = 0.5;
+  ros.twist.linear.y = -0.2;
+  ros.twist.angular.z = 0.25;
+
+  TwistRosContract contract;
+  ASSERT_TRUE(TwistRosConversion::RosToContract(ros, contract));
+  EXPECT_EQ(contract.header().frame_id(), "base_link");
+  EXPECT_EQ(contract.header().stamp().nanosec(), 8u);
+  EXPECT_DOUBLE_EQ(contract.twist().linear().y(), -0.2);
+  EXPECT_DOUBLE_EQ(contract.twist().angular().z(), 0.25);
+
+  TwistRosMessage back;
+  ASSERT_TRUE(TwistRosConversion::ContractToRos(contract, back));
+  EXPECT_EQ(back, ros);
+
+  TwistRosMessage invalid = ros;
+  invalid.twist.linear.z = std::numeric_limits<double>::infinity();
+  EXPECT_FALSE(TwistRosConversion::RosToContract(invalid, contract));
+  TwistRosContract badContract;
+  ASSERT_TRUE(TwistRosConversion::RosToContract(ros, badContract));
+  badContract.mutable_header()->set_frame_id("/base_link");
+  EXPECT_FALSE(TwistRosConversion::ContractToRos(badContract, back));
 }

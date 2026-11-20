@@ -211,3 +211,40 @@ TEST(ContractValidation, RejectsInvalidOdometry)
     EXPECT_FALSE(rejected.Diagnostic().empty());
   }
 }
+
+// UT-IPC-04: TwistStamped needs a valid header and a present, finite twist.
+TEST(ContractValidation, RejectsInvalidTwistStamped)
+{
+  geometry_proto::TwistStamped twist;
+  twist.mutable_header()->set_frame_id("base_link");
+  twist.mutable_twist()->mutable_linear()->set_x(0.5);
+  EXPECT_TRUE(ValidateTwistStamped(twist));
+
+  using Twist = geometry_proto::TwistStamped;
+  const struct
+  {
+    const char * name;
+    void (*mutate)(Twist &);
+  } cases[] = {
+      {"MissingTwist", [](Twist & t) { t.clear_twist(); }},
+      {"NonFiniteLinear",
+          [](Twist & t) {
+            t.mutable_twist()->mutable_linear()->set_z(std::numeric_limits<double>::quiet_NaN());
+          }},
+      {"NonFiniteAngular",
+          [](Twist & t) {
+            t.mutable_twist()->mutable_angular()->set_y(-std::numeric_limits<double>::infinity());
+          }},
+      {"AbsoluteFrameId", [](Twist & t) { t.mutable_header()->set_frame_id("/base_link"); }},
+      {"NanosecOverflow",
+          [](Twist & t) { t.mutable_header()->mutable_stamp()->set_nanosec(1000000000U); }},
+  };
+  for (const auto & c : cases) {
+    SCOPED_TRACE(c.name);
+    Twist value = twist;
+    c.mutate(value);
+    const ConversionResult rejected = ValidateTwistStamped(value);
+    EXPECT_FALSE(rejected);
+    EXPECT_FALSE(rejected.Diagnostic().empty());
+  }
+}

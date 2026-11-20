@@ -48,6 +48,11 @@ ConversionResult ValidateCovariance(const google::protobuf::RepeatedField<double
   return ConversionResult::Success();
 }
 
+bool IsFiniteTwist(const qrb::contract::geometry::v1::Twist & twist)
+{
+  return IsFiniteVector3(twist.linear()) && IsFiniteVector3(twist.angular());
+}
+
 /** @brief The rules for a PoseWithCovariance, wherever a Contract embeds one. */
 ConversionResult ValidatePoseWithCovariance(
     const qrb::contract::geometry::v1::PoseWithCovariance & value)
@@ -135,12 +140,21 @@ ConversionResult ValidateOdometry(const qrb::contract::nav::v1::Odometry & odome
   if (!odometry.has_twist())
     return Fail("twist is required");
   const auto & value = odometry.twist();
-  if (!value.has_twist() || !IsFiniteVector3(value.twist().linear()) ||
-      !IsFiniteVector3(value.twist().angular()))
+  if (!value.has_twist() || !IsFiniteTwist(value.twist()))
     return Fail("twist contains missing or non-finite values");
   return ValidateCovariance(value.covariance(),
       "twist covariance must be empty or contain 36 values",
       "twist covariance contains a non-finite value");
+}
+
+ConversionResult ValidateTwistStamped(const qrb::contract::geometry::v1::TwistStamped & twist)
+{
+  ConversionResult header = ValidateHeader(twist.header());
+  if (!header)
+    return header;
+  if (!twist.has_twist() || !IsFiniteTwist(twist.twist()))
+    return Fail("twist contains missing or non-finite values");
+  return ConversionResult::Success();
 }
 
 ConversionResult ValidatePointCloud2(const qrb::contract::sensor::v1::PointCloud2 & cloud,

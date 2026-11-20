@@ -5,9 +5,11 @@
 #define QRB_ROS_ADAPTER_ROS_IPC_BRIDGE_FLOW_BRIDGE_ROS_CONTRACT_GEOMETRY_HPP
 
 #include <geometry_msgs/msg/pose_with_covariance.hpp>
+#include <geometry_msgs/msg/twist.hpp>
 #include <geometry_msgs/msg/twist_with_covariance.hpp>
 
 #include "qrb/contract/geometry/v1/pose_with_covariance.pb.h"
+#include "qrb/contract/geometry/v1/twist.pb.h"
 #include "qrb/contract/geometry/v1/twist_with_covariance.pb.h"
 
 namespace qrb::adapter
@@ -25,6 +27,10 @@ void PoseWithCovarianceToContract(const geometry_msgs::msg::PoseWithCovariance &
     qrb::contract::geometry::v1::PoseWithCovariance & target);
 void PoseWithCovarianceToRos(const qrb::contract::geometry::v1::PoseWithCovariance & source,
     geometry_msgs::msg::PoseWithCovariance & target);
+void TwistToContract(const geometry_msgs::msg::Twist & source,
+    qrb::contract::geometry::v1::Twist & target);
+void TwistToRos(const qrb::contract::geometry::v1::Twist & source,
+    geometry_msgs::msg::Twist & target);
 void TwistWithCovarianceToContract(const geometry_msgs::msg::TwistWithCovariance & source,
     qrb::contract::geometry::v1::TwistWithCovariance & target);
 void TwistWithCovarianceToRos(const qrb::contract::geometry::v1::TwistWithCovariance & source,

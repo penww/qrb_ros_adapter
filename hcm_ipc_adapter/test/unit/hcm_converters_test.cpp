@@ -11,6 +11,7 @@
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/odometry_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/point_cloud_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/pose_hcm_converter.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/twist_hcm_converter.hpp"
 
 using namespace qrb::adapter;
 
@@ -270,4 +271,64 @@ TEST(HcmConverters, OdometryRoundTripsEveryFieldAndRejectsInvalidValues)
   descriptor.twistWithCovariance.covariance[3] = std::numeric_limits<double>::infinity();
   OdometryHcmContract out;
   EXPECT_FALSE((ConvertHcmToContract<OdometryHcmContract, OdometryHcmDescriptor>(descriptor, out)));
+}
+
+namespace
+{
+
+TwistHcmContract MakeTwist()
+{
+  TwistHcmContract twist;
+  twist.mutable_header()->mutable_stamp()->set_sec(2);
+  twist.mutable_header()->mutable_stamp()->set_nanosec(9);
+  twist.mutable_header()->set_frame_id("base_link");
+  twist.mutable_twist()->mutable_linear()->set_x(0.5);
+  twist.mutable_twist()->mutable_linear()->set_y(-0.2);
+  twist.mutable_twist()->mutable_angular()->set_z(0.25);
+  return twist;
+}
+
+}  // namespace
+
+// UT-HCM-04: TwistStamped keeps its frame, stamp and twist, and rejects what the
+// fixed-size descriptor cannot hold.
+TEST(HcmConverters, TwistRoundTripsEveryFieldAndRejectsInvalidValues)
+{
+  const TwistHcmContract source = MakeTwist();
+  TwistHcmDescriptor descriptor;
+  ASSERT_TRUE((ConvertContractToHcm<TwistHcmContract, TwistHcmDescriptor>(
+      source, DmaBufView{}, descriptor)));
+  EXPECT_EQ(descriptor.timestampNs, 2000000009u);
+  EXPECT_TRUE(descriptor.frameId == "base_link");
+  EXPECT_DOUBLE_EQ(descriptor.twist.linear.x, 0.5);
+  EXPECT_DOUBLE_EQ(descriptor.twist.linear.y, -0.2);
+  EXPECT_DOUBLE_EQ(descriptor.twist.angular.z, 0.25);
+
+  TwistHcmContract back;
+  back.mutable_header()->set_frame_id("stale");
+  ASSERT_TRUE((ConvertHcmToContract<TwistHcmContract, TwistHcmDescriptor>(descriptor, back)));
+  EXPECT_EQ(back.SerializeAsString(), source.SerializeAsString());
+
+  // A rejected message leaves the descriptor untouched.
+  TwistHcmDescriptor untouched;
+  ASSERT_EQ(untouched.frameId.Assign("untouched"), QC::QC_STATUS_OK);
+  TwistHcmContract invalid = MakeTwist();
+  invalid.mutable_twist()->mutable_angular()->set_x(std::numeric_limits<double>::quiet_NaN());
+  const ConversionResult in =
+      ConvertContractToHcm<TwistHcmContract, TwistHcmDescriptor>(invalid, DmaBufView{}, untouched);
+  EXPECT_FALSE(in);
+  EXPECT_FALSE(in.Diagnostic().empty());
+  EXPECT_TRUE(untouched.frameId == "untouched");
+
+  // FrameId_t is fixed-size: a longer frame_id is rejected, never truncated.
+  TwistHcmContract longFrame = MakeTwist();
+  longFrame.mutable_header()->set_frame_id(std::string(QRB::Memory::QRB_FRAME_ID_MAX_LEN + 1, 'f'));
+  EXPECT_FALSE((ConvertContractToHcm<TwistHcmContract, TwistHcmDescriptor>(
+      longFrame, DmaBufView{}, untouched)));
+  EXPECT_TRUE(untouched.frameId == "untouched");
+
+  // A non-finite twist produced on the HCM side must not reach ROS.
+  descriptor.twist.linear.z = std::numeric_limits<double>::infinity();
+  TwistHcmContract out;
+  EXPECT_FALSE((ConvertHcmToContract<TwistHcmContract, TwistHcmDescriptor>(descriptor, out)));
 }

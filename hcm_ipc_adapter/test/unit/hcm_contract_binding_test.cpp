@@ -10,6 +10,7 @@
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/odometry_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/point_cloud_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/pose_hcm_converter.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/twist_hcm_converter.hpp"
 
 using namespace qrb::adapter;
 
@@ -70,4 +71,14 @@ TEST(HcmContractBinding, EveryContractHasOneCompleteBindingAndAMatchingFactory)
   EXPECT_FALSE(pose.acceptsDescriptor(odomDescriptor));
   EXPECT_FALSE(odom.contractToHcm(odomContract, DmaBufView{}, poseDescriptor));
   EXPECT_FALSE(odom.hcmToContract(poseDescriptor, odomContract));
+
+  // Twist and Odometry are inline geometry too; neither takes the other's descriptor.
+  const HcmContractBinding & twist = *FindHcmContractBinding(kTwistStampedContractType);
+  TwistHcmDescriptor twistDescriptor;
+  TwistHcmContract twistContract;
+  EXPECT_TRUE(twist.acceptsDescriptor(twistDescriptor));
+  EXPECT_FALSE(twist.acceptsDescriptor(odomDescriptor));
+  EXPECT_FALSE(odom.acceptsDescriptor(twistDescriptor));
+  EXPECT_FALSE(twist.contractToHcm(twistContract, DmaBufView{}, odomDescriptor));
+  EXPECT_FALSE(twist.hcmToContract(odomDescriptor, twistContract));
 }
