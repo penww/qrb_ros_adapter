@@ -45,6 +45,7 @@
 #include "QC/sample/DataBroker.hpp"
 #include "QC/sample/SampleIF.hpp"
 #include "QRB/Memory/Geometry/PoseDescriptor.hpp"
+#include "QRB/Memory/Geometry/TFMessageDescriptor.hpp"
 #include "QRB/Memory/Geometry/TwistDescriptor.hpp"
 #include "QRB/Memory/Navigation/OdometryDescriptor.hpp"
 #include "QRB/Memory/Sensor/PointCloudDescriptor.hpp"
@@ -140,6 +141,9 @@ private:
     uint64_t m_frames = 0;
     uint64_t m_errorCount = 0;
     uint64_t m_poolExhausted = 0;
+    // The transforms of the frame FillFrame() sends as a TFMessage; the shared frames give an
+    // inline Contract's descriptor no buffer, so the TFMessage case attaches this one.
+    QRB::Memory::TransformStamped_t m_transforms[2];
 
     static constexpr const char *kPointCloudContract = "qrb.contract.sensor.v1.PointCloud2";
     static constexpr const char *kPoseContract =
@@ -153,6 +157,7 @@ private:
             kPoseContract,
             "qrb.contract.nav.v1.Odometry",
             "qrb.contract.geometry.v1.TwistStamped",
+            "qrb.contract.tf2.v1.TFMessage",
     };
     bool IsFilledContract() const;
 
@@ -444,6 +449,25 @@ void SampleIpcAdapter::FillFrame( ContractFrame &frame )
         (void) twist->frameId.Assign( "base_link" );
     }
 
+    auto *tf = dynamic_cast<QRB::Memory::TFMessageDescriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != tf )
+    {
+        // map -> odom and odom -> base_link, in heap memory of the sample.
+        const char *frames[2][2] = { { "map", "odom" }, { "odom", "base_link" } };
+        for ( uint32_t i = 0; i < 2; i++ )
+        {
+            m_transforms[i] = QRB::Memory::TransformStamped_t{};
+            (void) m_transforms[i].frameId.Assign( frames[i][0] );
+            (void) m_transforms[i].childFrameId.Assign( frames[i][1] );
+        }
+        tf->pBuf = m_transforms;
+        tf->size = sizeof( m_transforms );
+        tf->offset = 0;
+        tf->validSize = sizeof( m_transforms );
+        tf->allocatorType = Memory::QC_MEMORY_ALLOCATOR_HEAP;
+        tf->transformCount = 2;
+    }
+
     auto *cloud = dynamic_cast<QRB::Memory::PointCloudDescriptor_t *>( &frame.Descriptor() );
     if ( nullptr == cloud )
     {
@@ -507,6 +531,15 @@ void SampleIpcAdapter::UpdateFrame( ContractFrame &frame )
         // Turn in place, faster with every frame and back to rest every 100 frames.
         twist->timestampNs = nowNs;
         twist->twist.angular.z = (double) ( m_frames % 100 ) * 0.01;
+    }
+
+    auto *tf = dynamic_cast<QRB::Memory::TFMessageDescriptor_t *>( &frame.Descriptor() );
+    if ( nullptr != tf )
+    {
+        // map -> odom stays put; odom -> base_link moves along x by 1 cm per frame.
+        m_transforms[0].timestampNs = nowNs;
+        m_transforms[1].timestampNs = nowNs;
+        m_transforms[1].transform.translation.x = (double) m_frames * 0.01;
     }
 }
 

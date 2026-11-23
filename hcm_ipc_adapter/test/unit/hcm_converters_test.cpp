@@ -11,6 +11,7 @@
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/odometry_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/point_cloud_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/pose_hcm_converter.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/tf_message_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/twist_hcm_converter.hpp"
 
 using namespace qrb::adapter;
@@ -331,4 +332,117 @@ TEST(HcmConverters, TwistRoundTripsEveryFieldAndRejectsInvalidValues)
   descriptor.twist.linear.z = std::numeric_limits<double>::infinity();
   TwistHcmContract out;
   EXPECT_FALSE((ConvertHcmToContract<TwistHcmContract, TwistHcmDescriptor>(descriptor, out)));
+}
+
+namespace
+{
+
+TFMessageHcmContract MakeTFMessage(int count)
+{
+  TFMessageHcmContract message;
+  for (int i = 0; i < count; ++i) {
+    auto * transform = message.add_transforms();
+    transform->mutable_header()->mutable_stamp()->set_sec(4 + i);
+    transform->mutable_header()->mutable_stamp()->set_nanosec(11u * static_cast<unsigned>(i));
+    transform->mutable_header()->set_frame_id(i == 0 ? "map" : "odom");
+    transform->set_child_frame_id(i == 0 ? "odom" : "base_link");
+    transform->mutable_transform()->mutable_translation()->set_x(1.5 * i);
+    transform->mutable_transform()->mutable_translation()->set_z(-0.25);
+    transform->mutable_transform()->mutable_rotation()->set_z(0.6);
+    transform->mutable_transform()->mutable_rotation()->set_w(0.8);
+  }
+  return message;
+}
+
+/** @brief A TFMessage descriptor over heap storage for `capacity` transforms. */
+struct HeapTFDescriptor
+{
+  explicit HeapTFDescriptor(std::uint32_t capacity, std::size_t offset = 0)
+    : storage(offset + TFMessageHcmDescriptor::CalcBufferSize(capacity), 0)
+  {
+    descriptor.pBuf = storage.data();
+    descriptor.size = storage.size();
+    descriptor.offset = offset;
+    descriptor.allocatorType = QC::Memory::QC_MEMORY_ALLOCATOR_HEAP;
+  }
+
+  std::vector<std::uint8_t> storage;
+  TFMessageHcmDescriptor descriptor;
+};
+
+}  // namespace
+
+// UT-HCM-05: TFMessage writes every transform into the descriptor's buffer,
+// reads them back unchanged, and rejects what that buffer cannot hold.
+TEST(HcmConverters, TFMessageRoundTripsThroughTheBufferAndRejectsWhatItCannotHold)
+{
+  const TFMessageHcmContract source = MakeTFMessage(3);
+  // An odd offset: the converter must not need the array to be aligned.
+  HeapTFDescriptor heap(3, 5);
+  ASSERT_TRUE((ConvertContractToHcm<TFMessageHcmContract, TFMessageHcmDescriptor>(
+      source, DmaBufView{}, heap.descriptor)));
+  EXPECT_EQ(heap.descriptor.transformCount, 3u);
+  EXPECT_EQ(heap.descriptor.validSize, TFMessageHcmDescriptor::CalcBufferSize(3));
+  QRB::Memory::TransformStamped_t second{};
+  std::memcpy(&second, static_cast<std::uint8_t *>(heap.descriptor.GetDataPtr()) + sizeof(second),
+      sizeof(second));
+  EXPECT_EQ(second.timestampNs, 5000000011u);
+  EXPECT_TRUE(second.frameId == "odom");
+  EXPECT_TRUE(second.childFrameId == "base_link");
+  EXPECT_DOUBLE_EQ(second.transform.translation.x, 1.5);
+  EXPECT_DOUBLE_EQ(second.transform.rotation.w, 0.8);
+
+  TFMessageHcmContract back;
+  back.add_transforms();  // stale
+  ASSERT_TRUE(
+      (ConvertHcmToContract<TFMessageHcmContract, TFMessageHcmDescriptor>(heap.descriptor, back)));
+  EXPECT_EQ(back.SerializeAsString(), source.SerializeAsString());
+
+  // An empty message needs no buffer.
+  TFMessageHcmDescriptor bufferless;
+  ASSERT_TRUE((ConvertContractToHcm<TFMessageHcmContract, TFMessageHcmDescriptor>(
+      TFMessageHcmContract{}, DmaBufView{}, bufferless)));
+  EXPECT_EQ(bufferless.transformCount, 0u);
+  ASSERT_TRUE(
+      (ConvertHcmToContract<TFMessageHcmContract, TFMessageHcmDescriptor>(bufferless, back)));
+  EXPECT_EQ(back.transforms_size(), 0);
+
+  // A rejected message leaves the descriptor and its buffer untouched.
+  HeapTFDescriptor untouched(2);
+  untouched.descriptor.transformCount = 1;
+  const std::vector<std::uint8_t> before = untouched.storage;
+  TFMessageHcmContract tooMany = MakeTFMessage(3);
+  TFMessageHcmContract invalid = MakeTFMessage(2);
+  invalid.mutable_transforms(1)->mutable_transform()->mutable_rotation()->set_x(
+      std::numeric_limits<double>::quiet_NaN());
+  TFMessageHcmContract longChild = MakeTFMessage(2);
+  longChild.mutable_transforms(1)->set_child_frame_id(
+      std::string(QRB::Memory::QRB_FRAME_ID_MAX_LEN + 1, 'c'));
+  for (const TFMessageHcmContract * rejected : {&tooMany, &invalid, &longChild}) {
+    const ConversionResult result =
+        ConvertContractToHcm<TFMessageHcmContract, TFMessageHcmDescriptor>(
+            *rejected, DmaBufView{}, untouched.descriptor);
+    EXPECT_FALSE(result);
+    EXPECT_FALSE(result.Diagnostic().empty());
+    EXPECT_EQ(untouched.descriptor.transformCount, 1u);
+    EXPECT_EQ(untouched.storage, before);
+  }
+
+  // A buffer the CPU cannot reach is rejected, like one of another process.
+  HeapTFDescriptor foreign(3);
+  foreign.descriptor.allocatorType = QC::Memory::QC_MEMORY_ALLOCATOR_LAST;
+  EXPECT_FALSE((ConvertContractToHcm<TFMessageHcmContract, TFMessageHcmDescriptor>(
+      source, DmaBufView{}, foreign.descriptor)));
+
+  // A transformCount beyond the buffer, or a non-finite transform from HCM, never reaches ROS.
+  HeapTFDescriptor overCount(2);
+  overCount.descriptor.transformCount = 3;
+  TFMessageHcmContract out;
+  EXPECT_FALSE((ConvertHcmToContract<TFMessageHcmContract, TFMessageHcmDescriptor>(
+      overCount.descriptor, out)));
+  QRB::Memory::TransformStamped_t bad{};
+  bad.transform.translation.y = std::numeric_limits<double>::infinity();
+  std::memcpy(heap.descriptor.GetDataPtr(), &bad, sizeof(bad));
+  EXPECT_FALSE(
+      (ConvertHcmToContract<TFMessageHcmContract, TFMessageHcmDescriptor>(heap.descriptor, out)));
 }

@@ -237,6 +237,92 @@ struct RosProbeSample<adapter::TwistRosMessage>
   }
 };
 
+// --- tf2.v1.TFMessage (inline) ------------------------------------------------
+
+/**
+ * kTransforms transforms. The six translation and rotation x, y, z of the first
+ * carry the probe stamp, the bytes either side reports; every transform has the
+ * identity rotation's w and its own child frame. The layout is the one
+ * HcmProbeSample<> uses, so either side checks what the other sends.
+ */
+template <>
+struct RosProbeSample<adapter::TFMessageRosMessage>
+{
+  using Message = adapter::TFMessageRosMessage;
+  static constexpr const char * kFrameId = "stream_probe";
+  static constexpr std::size_t kTransforms = 4;
+  using Values = std::array<double, kMinProbeDoubles>;
+
+  class Source
+  {
+  public:
+    Source(std::uint64_t, std::uint32_t, std::uint32_t streamTag) : streamTag_(streamTag) {}
+
+    SendOutcome Next(std::uint64_t sequence,
+        std::unique_ptr<Message> & out,
+        std::uint64_t & sendTimeNs)
+    {
+      out = std::make_unique<Message>();
+      const std::uint64_t now = MonotonicNowNs();
+      sendTimeNs = now;
+      Values values{};
+      StampDoubles(values.data(), values.size(), streamTag_, sequence, now);
+      out->transforms.resize(kTransforms);
+      for (std::size_t i = 0; i < kTransforms; ++i) {
+        auto & transform = out->transforms[i];
+        transform.header.frame_id = kFrameId;
+        transform.header.stamp.sec = static_cast<std::int32_t>(now / 1000000000ull);
+        transform.header.stamp.nanosec = static_cast<std::uint32_t>(now % 1000000000ull);
+        transform.child_frame_id = ChildFrameId(i);
+      }
+      auto & first = out->transforms[0].transform;
+      first.translation.x = values[0];
+      first.translation.y = values[1];
+      first.translation.z = values[2];
+      first.rotation.x = values[3];
+      first.rotation.y = values[4];
+      first.rotation.z = values[5];
+      return SendOutcome::kSent;
+    }
+
+    std::uint64_t PayloadBytes() const { return sizeof(Values); }
+
+  private:
+    std::uint32_t streamTag_;
+  };
+
+  static FrameReading Check(const Message & tf,
+      std::uint32_t streamTag,
+      std::uint64_t & payloadBytes)
+  {
+    payloadBytes = sizeof(Values);
+    FrameReading reading;
+    if (tf.transforms.empty())
+      return reading;
+    const auto & first = tf.transforms[0].transform;
+    const Values values{first.translation.x, first.translation.y, first.translation.z,
+        first.rotation.x, first.rotation.y, first.rotation.z};
+    reading = CheckDoubles(values.data(), values.size(), streamTag);
+    if (reading.check != FrameCheck::kOk)
+      return reading;
+    bool layout = tf.transforms.size() == kTransforms;
+    for (std::size_t i = 0; layout && i < kTransforms; ++i) {
+      const auto & transform = tf.transforms[i];
+      layout = transform.header.frame_id == kFrameId &&
+               transform.child_frame_id == ChildFrameId(i) && transform.transform.rotation.w == 1.0;
+    }
+    if (!layout)
+      reading.check = FrameCheck::kBadLayout;
+    return reading;
+  }
+
+private:
+  static std::string ChildFrameId(std::size_t index)
+  {
+    return "stream_probe_" + std::to_string(index);
+  }
+};
+
 // --- sensor.v1.PointCloud2 (DMA-BUF) ------------------------------------------
 
 /**

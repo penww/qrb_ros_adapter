@@ -248,3 +248,64 @@ TEST(ContractValidation, RejectsInvalidTwistStamped)
     EXPECT_FALSE(rejected.Diagnostic().empty());
   }
 }
+
+// UT-IPC-05: TFMessage checks every transform: header, child_frame_id and a
+// finite, non-zero rotation; an empty message is valid.
+TEST(ContractValidation, RejectsInvalidTFMessage)
+{
+  using TF = ::qrb::contract::tf2::v1::TFMessage;
+  TF message;
+  EXPECT_TRUE(ValidateTFMessage(message));
+  for (int i = 0; i < 2; ++i) {
+    auto * transform = message.add_transforms();
+    transform->mutable_header()->set_frame_id("map");
+    transform->set_child_frame_id("odom");
+    transform->mutable_transform()->mutable_rotation()->set_w(1.0);
+  }
+  EXPECT_TRUE(ValidateTFMessage(message));
+
+  const struct
+  {
+    const char * name;
+    void (*mutate)(TF &);
+  } cases[] = {
+      {"MissingTransform", [](TF & m) { m.mutable_transforms(1)->clear_transform(); }},
+      {"ZeroRotation",
+          [](TF & m) {
+            m.mutable_transforms(1)->mutable_transform()->mutable_rotation()->set_w(0);
+          }},
+      {"NonFiniteTranslation",
+          [](TF & m) {
+            m.mutable_transforms(0)->mutable_transform()->mutable_translation()->set_x(
+                std::numeric_limits<double>::quiet_NaN());
+          }},
+      {"NonFiniteRotation",
+          [](TF & m) {
+            m.mutable_transforms(1)->mutable_transform()->mutable_rotation()->set_y(
+                std::numeric_limits<double>::infinity());
+          }},
+      {"AbsoluteChildFrameId",
+          [](TF & m) { m.mutable_transforms(1)->set_child_frame_id("/odom"); }},
+      {"AbsoluteFrameId",
+          [](TF & m) { m.mutable_transforms(0)->mutable_header()->set_frame_id("/map"); }},
+      {"NanosecOverflow",
+          [](TF & m) {
+            m.mutable_transforms(0)->mutable_header()->mutable_stamp()->set_nanosec(1000000000U);
+          }},
+      {"TooManyTransforms",
+          [](TF & m) {
+            const auto first = m.transforms(0);
+            while (static_cast<std::size_t>(m.transforms_size()) <=
+                   contract_limits::kMaxTransformCount)
+              *m.add_transforms() = first;
+          }},
+  };
+  for (const auto & c : cases) {
+    SCOPED_TRACE(c.name);
+    TF value = message;
+    c.mutate(value);
+    const ConversionResult rejected = ValidateTFMessage(value);
+    EXPECT_FALSE(rejected);
+    EXPECT_FALSE(rejected.Diagnostic().empty());
+  }
+}

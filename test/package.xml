@@ -18,6 +18,7 @@
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
+  <depend>tf2_msgs</depend>
   <depend>qrb_ros_transport_point_cloud2_type</depend>
   <depend>qrb_ros_adapter</depend>
   <build_depend>nlohmann-json-dev</build_depend>

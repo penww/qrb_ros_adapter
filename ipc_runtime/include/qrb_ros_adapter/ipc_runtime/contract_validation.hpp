@@ -12,6 +12,7 @@
 #include "qrb/contract/geometry/v1/twist_stamped.pb.h"
 #include "qrb/contract/nav/v1/odometry.pb.h"
 #include "qrb/contract/sensor/v1/point_cloud2.pb.h"
+#include "qrb/contract/tf2/v1/tf_message.pb.h"
 #include "qrb_ros_adapter/ipc_runtime/contract_limits.hpp"
 #include "qrb_ros_adapter/ipc_runtime/conversion_result.hpp"
 
@@ -35,6 +36,12 @@ ConversionResult ValidateOdometry(const qrb::contract::nav::v1::Odometry & odome
 
 /** @brief Checks the header and that the twist is present and finite. */
 ConversionResult ValidateTwistStamped(const qrb::contract::geometry::v1::TwistStamped & twist);
+
+/**
+ * @brief Checks the transform count, and for each transform its header,
+ * `child_frame_id` (as a frame_id), a finite translation and a finite, non-zero rotation.
+ */
+ConversionResult ValidateTFMessage(const qrb::contract::tf2::v1::TFMessage & message);
 
 ConversionResult ValidatePointCloud2(const qrb::contract::sensor::v1::PointCloud2 & cloud,
     std::uint64_t externalPayloadSize);

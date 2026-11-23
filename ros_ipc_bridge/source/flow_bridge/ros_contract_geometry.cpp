@@ -63,6 +63,34 @@ void PoseWithCovarianceToRos(const qrb::contract::geometry::v1::PoseWithCovarian
   CovarianceToRos(source.covariance(), target.covariance);
 }
 
+void TransformToContract(const geometry_msgs::msg::Transform & source,
+    qrb::contract::geometry::v1::Transform & target)
+{
+  auto * translation = target.mutable_translation();
+  translation->set_x(source.translation.x);
+  translation->set_y(source.translation.y);
+  translation->set_z(source.translation.z);
+  auto * rotation = target.mutable_rotation();
+  rotation->set_x(source.rotation.x);
+  rotation->set_y(source.rotation.y);
+  rotation->set_z(source.rotation.z);
+  rotation->set_w(source.rotation.w);
+}
+
+void TransformToRos(const qrb::contract::geometry::v1::Transform & source,
+    geometry_msgs::msg::Transform & target)
+{
+  const auto & translation = source.translation();
+  const auto & rotation = source.rotation();
+  target.translation.x = translation.x();
+  target.translation.y = translation.y();
+  target.translation.z = translation.z();
+  target.rotation.x = rotation.x();
+  target.rotation.y = rotation.y();
+  target.rotation.z = rotation.z();
+  target.rotation.w = rotation.w();
+}
+
 void TwistToContract(const geometry_msgs::msg::Twist & source,
     qrb::contract::geometry::v1::Twist & target)
 {

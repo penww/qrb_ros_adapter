@@ -8,6 +8,7 @@
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/odometry_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/point_cloud_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/pose_hcm_converter.hpp"
+#include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/tf_message_hcm_converter.hpp"
 #include "qrb_ros_adapter/hcm_ipc_adapter/flow_client/twist_hcm_converter.hpp"
 #endif
 
@@ -15,6 +16,7 @@
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/odometry_ros_converter.hpp"
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/point_cloud_ros_converter.hpp"
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/pose_ros_converter.hpp"
+#include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/tf_message_ros_converter.hpp"
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/twist_ros_converter.hpp"
 #endif
 
@@ -42,4 +44,12 @@ QRB_CONTRACT_MAPPING( TwistStamped,
     ::qrb::contract::geometry::v1::TwistStamped,
     ::qrb::adapter::TwistHcmDescriptor,
     ::qrb::adapter::TwistRosMessage, "twist_bridge" )
+
+// The HCM descriptor keeps its transforms in a DMA buffer; across IPC they
+// travel inline, so ROS gets a plain message.
+QRB_CONTRACT_MAPPING( TFMessage,
+    "qrb.contract.tf2.v1.TFMessage", Inline,
+    ::qrb::contract::tf2::v1::TFMessage,
+    ::qrb::adapter::TFMessageHcmDescriptor,
+    ::qrb::adapter::TFMessageRosMessage, "tf_message_bridge" )
 #endif

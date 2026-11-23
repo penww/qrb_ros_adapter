@@ -63,6 +63,34 @@ void PoseWithCovarianceToContract(const QRB::Memory::PoseWithCovariance_t & sour
   CovarianceToContract(source.covariance, *target.mutable_covariance());
 }
 
+void TransformToHcm(const ::qrb::contract::geometry::v1::Transform & source,
+    QRB::Memory::Transform_t & target)
+{
+  const auto & translation = source.translation();
+  const auto & rotation = source.rotation();
+  target.translation.x = translation.x();
+  target.translation.y = translation.y();
+  target.translation.z = translation.z();
+  target.rotation.x = rotation.x();
+  target.rotation.y = rotation.y();
+  target.rotation.z = rotation.z();
+  target.rotation.w = rotation.w();
+}
+
+void TransformToContract(const QRB::Memory::Transform_t & source,
+    ::qrb::contract::geometry::v1::Transform & target)
+{
+  auto * translation = target.mutable_translation();
+  translation->set_x(source.translation.x);
+  translation->set_y(source.translation.y);
+  translation->set_z(source.translation.z);
+  auto * rotation = target.mutable_rotation();
+  rotation->set_x(source.rotation.x);
+  rotation->set_y(source.rotation.y);
+  rotation->set_z(source.rotation.z);
+  rotation->set_w(source.rotation.w);
+}
+
 void TwistToHcm(const ::qrb::contract::geometry::v1::Twist & source, QRB::Memory::Twist_t & target)
 {
   target.linear.x = source.linear().x();

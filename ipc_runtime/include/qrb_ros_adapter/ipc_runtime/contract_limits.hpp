@@ -14,6 +14,11 @@ inline constexpr std::size_t kMaxFrameIdLength = 255;
 inline constexpr std::size_t kMaxPointFieldCount = 64;
 inline constexpr std::size_t kMaxPointFieldNameLength = 63;
 inline constexpr std::uint32_t kMaxPointFieldElementCount = 1024;
+/**
+ * Transforms in one TFMessage: with frame ids at kMaxFrameIdLength, 200 serialize to about
+ * 118 KiB, within the IPC payload limit (kMaxPayloadSize, 128 KiB).
+ */
+inline constexpr std::size_t kMaxTransformCount = 200;
 
 }  // namespace qrb::adapter::contract_limits
 

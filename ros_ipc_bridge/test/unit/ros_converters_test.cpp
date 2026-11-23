@@ -17,6 +17,7 @@
 
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/odometry_ros_converter.hpp"
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/point_cloud_ros_converter.hpp"
+#include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/tf_message_ros_converter.hpp"
 #include "qrb_ros_adapter/ros_ipc_bridge/flow_bridge/twist_ros_converter.hpp"
 
 using namespace qrb::adapter;
@@ -240,4 +241,42 @@ TEST(TwistRosConverter, MapsEveryFieldBothWaysAndRejectsInvalidValues)
   ASSERT_TRUE(TwistRosConversion::RosToContract(ros, badContract));
   badContract.mutable_header()->set_frame_id("/base_link");
   EXPECT_FALSE(TwistRosConversion::ContractToRos(badContract, back));
+}
+
+// UT-ROS-04: tf2_msgs/TFMessage maps every transform 1:1 to the Contract; an
+// invalid transform is rejected in either direction.
+TEST(TFMessageRosConverter, MapsEveryTransformBothWaysAndRejectsInvalidValues)
+{
+  TFMessageRosMessage ros;
+  ros.transforms.resize(2);
+  for (std::size_t i = 0; i < ros.transforms.size(); ++i) {
+    auto & transform = ros.transforms[i];
+    transform.header.stamp.sec = static_cast<std::int32_t>(10 + i);
+    transform.header.stamp.nanosec = static_cast<std::uint32_t>(3 * i);
+    transform.header.frame_id = i == 0 ? "map" : "odom";
+    transform.child_frame_id = i == 0 ? "odom" : "base_link";
+    transform.transform.translation.x = 0.5 * static_cast<double>(i);
+    transform.transform.rotation.z = 0.6;
+    transform.transform.rotation.w = 0.8;
+  }
+
+  TFMessageRosContract contract;
+  ASSERT_TRUE(TFMessageRosConversion::RosToContract(ros, contract));
+  ASSERT_EQ(contract.transforms_size(), 2);
+  EXPECT_EQ(contract.transforms(1).child_frame_id(), "base_link");
+  EXPECT_EQ(contract.transforms(1).header().stamp().nanosec(), 3u);
+  EXPECT_DOUBLE_EQ(contract.transforms(1).transform().translation().x(), 0.5);
+
+  TFMessageRosMessage back;
+  back.transforms.resize(5);  // stale
+  ASSERT_TRUE(TFMessageRosConversion::ContractToRos(contract, back));
+  EXPECT_EQ(back, ros);
+
+  TFMessageRosMessage invalid = ros;
+  invalid.transforms[1].transform.rotation.w = std::numeric_limits<double>::quiet_NaN();
+  EXPECT_FALSE(TFMessageRosConversion::RosToContract(invalid, contract));
+  TFMessageRosContract badContract;
+  ASSERT_TRUE(TFMessageRosConversion::RosToContract(ros, badContract));
+  badContract.mutable_transforms(0)->mutable_header()->set_frame_id("/map");
+  EXPECT_FALSE(TFMessageRosConversion::ContractToRos(badContract, back));
 }

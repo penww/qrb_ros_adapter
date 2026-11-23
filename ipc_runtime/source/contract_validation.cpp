@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <limits>
+#include <string>
 
 #include "qrb_ros_adapter/ipc_runtime/contract_time.hpp"
 
@@ -154,6 +155,33 @@ ConversionResult ValidateTwistStamped(const qrb::contract::geometry::v1::TwistSt
     return header;
   if (!twist.has_twist() || !IsFiniteTwist(twist.twist()))
     return Fail("twist contains missing or non-finite values");
+  return ConversionResult::Success();
+}
+
+ConversionResult ValidateTFMessage(const qrb::contract::tf2::v1::TFMessage & message)
+{
+  if (static_cast<std::size_t>(message.transforms_size()) > contract_limits::kMaxTransformCount)
+    return Fail("TFMessage holds more transforms than the contract limit");
+  for (int i = 0; i < message.transforms_size(); ++i) {
+    const auto & transform = message.transforms(i);
+    const std::string where = "transforms[" + std::to_string(i) + "]: ";
+    ConversionResult header = ValidateHeader(transform.header());
+    if (!header)
+      return ConversionResult::Failure(where + header.Diagnostic());
+    ConversionResult childFrameId = ValidateFrameId(transform.child_frame_id());
+    if (!childFrameId)
+      return ConversionResult::Failure(where + "child_frame_id: " + childFrameId.Diagnostic());
+    if (!transform.has_transform())
+      return ConversionResult::Failure(where + "transform is required");
+    const auto & translation = transform.transform().translation();
+    const auto & rotation = transform.transform().rotation();
+    if (!IsFiniteVector3(translation) || !std::isfinite(rotation.x()) ||
+        !std::isfinite(rotation.y()) || !std::isfinite(rotation.z()) ||
+        !std::isfinite(rotation.w()))
+      return ConversionResult::Failure(where + "transform contains non-finite values");
+    if (rotation.x() == 0.0 && rotation.y() == 0.0 && rotation.z() == 0.0 && rotation.w() == 0.0)
+      return ConversionResult::Failure(where + "rotation quaternion must be non-zero");
+  }
   return ConversionResult::Success();
 }
 

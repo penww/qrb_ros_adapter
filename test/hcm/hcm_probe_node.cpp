@@ -11,10 +11,12 @@
 #include <array>
 #include <atomic>
 #include <cstring>
+#include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "QC/Infras/Memory/BufferDescriptor.hpp"
 #include "QC/Node/Ifs/QCNodeConfigIfs.hpp"
@@ -239,6 +241,141 @@ struct HcmProbeSample<adapter::TwistHcmDescriptor>
     if (reading.check == FrameCheck::kOk && twist.frameId != kFrameId)
       reading.check = FrameCheck::kBadLayout;
     return reading;
+  }
+};
+
+// --- tf2.v1.TFMessage (inline, over the descriptor's buffer) ------------------
+
+/**
+ * kTransforms transforms in the descriptor's buffer. The six translation and
+ * rotation x, y, z of the first carry the probe stamp, the bytes either side
+ * reports; every transform has the identity rotation's w and its own child
+ * frame, so a sample that drops or reorders transforms is caught as a bad layout.
+ *
+ * The shared frames give an inline Contract's descriptor no buffer, so a sender
+ * attaches heap storage of its own to each descriptor, once.
+ */
+template <>
+struct HcmProbeSample<adapter::TFMessageHcmDescriptor>
+{
+  using Descriptor = adapter::TFMessageHcmDescriptor;
+  using Transform = QRB::Memory::TransformStamped_t;
+  static constexpr const char * kFrameId = "stream_probe";
+  static constexpr std::uint32_t kTransforms = 4;
+  using Values = std::array<double, kMinProbeDoubles>;
+
+  static std::string CheckPayloadBytes(std::uint64_t) { return {}; }
+
+  static std::uint64_t SentBytes(const HcmSenderState &) { return sizeof(Values); }
+
+  static HcmStampResult Stamp(Descriptor & tf, HcmSenderState & state, std::uint64_t sequence)
+  {
+    if (tf.pBuf == nullptr)
+      AttachStorage(tf);
+    // Any buffer the CPU reaches: a local DMA-BUF is synced, heap memory needs no sync.
+    int fd = -1;
+    if (!HoldsTransforms(tf, kTransforms) || !UsableBuffer(tf, fd))
+      return HcmStampResult::kBadBuffer;
+    if (adapter::BeginDmaBufCpuWrite(fd) != adapter::Status::kOk)
+      return HcmStampResult::kSyncFailed;
+    const std::uint64_t now = MonotonicNowNs();
+    state.lastSendNs = now;
+    Values values{};
+    StampDoubles(values.data(), values.size(), state.streamTag, sequence, now);
+    auto * bytes = static_cast<std::uint8_t *>(tf.GetDataPtr());
+    for (std::uint32_t i = 0; i < kTransforms; ++i) {
+      Transform transform{};
+      transform.timestampNs = now;
+      (void)transform.frameId.Assign(kFrameId);                      // fits FrameId_t
+      (void)transform.childFrameId.Assign(ChildFrameId(i).c_str());  // fits FrameId_t
+      if (i == 0) {
+        transform.transform.translation.x = values[0];
+        transform.transform.translation.y = values[1];
+        transform.transform.translation.z = values[2];
+        transform.transform.rotation.x = values[3];
+        transform.transform.rotation.y = values[4];
+        transform.transform.rotation.z = values[5];
+      }
+      std::memcpy(bytes + i * sizeof(Transform), &transform, sizeof(Transform));
+    }
+    tf.transformCount = kTransforms;
+    tf.validSize = Descriptor::CalcBufferSize(kTransforms);
+    if (adapter::EndDmaBufCpuWrite(fd) != adapter::Status::kOk)
+      return HcmStampResult::kSyncFailed;
+    return HcmStampResult::kOk;
+  }
+
+  static FrameReading Check(const Descriptor & tf,
+      std::uint32_t streamTag,
+      std::uint64_t & payloadBytes)
+  {
+    payloadBytes = sizeof(Values);
+    FrameReading reading;
+    int fd = -1;
+    if (tf.transformCount == 0 || !HoldsTransforms(tf, tf.transformCount) ||
+        !UsableBuffer(tf, fd) || adapter::BeginDmaBufCpuRead(fd) != adapter::Status::kOk)
+      return reading;
+    std::array<Transform, kTransforms> transforms{};
+    const std::uint32_t count = std::min(tf.transformCount, kTransforms);
+    std::memcpy(transforms.data(), tf.GetDataPtr(), count * sizeof(Transform));
+    const bool ended = adapter::EndDmaBufCpuRead(fd) == adapter::Status::kOk;
+
+    const auto & first = transforms[0].transform;
+    const Values values{first.translation.x, first.translation.y, first.translation.z,
+        first.rotation.x, first.rotation.y, first.rotation.z};
+    reading = CheckDoubles(values.data(), values.size(), streamTag);
+    if (reading.check != FrameCheck::kOk)
+      return reading;
+    if (!ended) {
+      reading.check = FrameCheck::kBadPayload;
+      return reading;
+    }
+    bool layout = tf.transformCount == kTransforms;
+    for (std::uint32_t i = 0; layout && i < kTransforms; ++i) {
+      layout = transforms[i].frameId == kFrameId &&
+               transforms[i].childFrameId == ChildFrameId(i).c_str() &&
+               transforms[i].transform.rotation.w == 1.0;
+    }
+    if (!layout)
+      reading.check = FrameCheck::kBadLayout;
+    return reading;
+  }
+
+private:
+  static std::string ChildFrameId(std::uint32_t index)
+  {
+    return "stream_probe_" + std::to_string(index);
+  }
+
+  /**
+   * Heap storage for the transforms of one descriptor, kept for the life of the
+   * probe; a sender cycles through at most ContractFramePool::kMaxSize of them.
+   */
+  static void AttachStorage(Descriptor & tf)
+  {
+    static std::mutex mutex;
+    static std::vector<std::unique_ptr<std::array<Transform, kTransforms>>> storage;
+    std::lock_guard<std::mutex> lock(mutex);
+    storage.push_back(std::make_unique<std::array<Transform, kTransforms>>());
+    tf.pBuf = storage.back()->data();
+    tf.size = sizeof(*storage.back());
+    tf.offset = 0;
+    tf.validSize = 0;
+    tf.allocatorType = QC::Memory::QC_MEMORY_ALLOCATOR_HEAP;
+  }
+
+  /** The fd if the buffer is a local DMA-BUF, else -1; false for a buffer the CPU cannot reach. */
+  static bool UsableBuffer(const Descriptor & tf, int & fd)
+  {
+    const adapter::HcmBufferAccess access = adapter::InspectHcmBuffer(tf, fd);
+    return access == adapter::HcmBufferAccess::kLocalDmaBuf ||
+           access == adapter::HcmBufferAccess::kHostMemory;
+  }
+
+  static bool HoldsTransforms(const Descriptor & tf, std::uint32_t count)
+  {
+    return tf.pBuf != nullptr && tf.offset <= tf.size &&
+           tf.size - tf.offset >= Descriptor::CalcBufferSize(count);
   }
 };
 

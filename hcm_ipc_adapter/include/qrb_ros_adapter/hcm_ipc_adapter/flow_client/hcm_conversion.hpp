@@ -12,6 +12,7 @@
 #include "QC/Common/QCString.hpp"
 #include "QRB/Memory/Common/Types.hpp"
 #include "qrb/contract/geometry/v1/pose_with_covariance.pb.h"
+#include "qrb/contract/geometry/v1/transform.pb.h"
 #include "qrb/contract/geometry/v1/twist.pb.h"
 #include "qrb/contract/geometry/v1/twist_with_covariance.pb.h"
 #include "qrb_ros_adapter/ipc_runtime/conversion_result.hpp"
@@ -53,6 +54,10 @@ void PoseWithCovarianceToHcm(const ::qrb::contract::geometry::v1::PoseWithCovari
     QRB::Memory::PoseWithCovariance_t & target);
 void PoseWithCovarianceToContract(const QRB::Memory::PoseWithCovariance_t & source,
     ::qrb::contract::geometry::v1::PoseWithCovariance & target);
+void TransformToHcm(const ::qrb::contract::geometry::v1::Transform & source,
+    QRB::Memory::Transform_t & target);
+void TransformToContract(const QRB::Memory::Transform_t & source,
+    ::qrb::contract::geometry::v1::Transform & target);
 void TwistToHcm(const ::qrb::contract::geometry::v1::Twist & source, QRB::Memory::Twist_t & target);
 void TwistToContract(const QRB::Memory::Twist_t & source,
     ::qrb::contract::geometry::v1::Twist & target);
